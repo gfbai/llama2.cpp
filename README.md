@@ -1,3 +1,14 @@
+# TODO
+
+| No. | Task Description | Status  | Expected Completion Date |
+|-----|------------------|----------|--------------------------|
+| 1   | Performing inference with the small GPT model.    | √ | 2023-10-31               |
+| 2   | Performing inference with the meta-llama2 7b model.    | × | 2023-11-05               |
+| 3   | Performing inference with quantized model    | × | 2023-11-15               |
+| 4   | Special hardware support (e.g., CUDA or even AIE)    | ×    | 2023-11-30               |
+
+**This project, llama2.cpp, is derived from the llama2.c project and has been entirely rewritten in pure C++. It's specifically designed for performing inference for the llama2 and other GPT models without any environmental dependencies. The transition to C++ enhances the code's readability and extensibility. It can be used not only for learning about LLM inference, but also for implementing inference support on specialized hardware.**
+
 ## llama2.c
 
 <p align="center">
