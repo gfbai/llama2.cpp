@@ -1,15 +1,35 @@
-# TODO
+# llama2.cpp
 
+## TODO
 | No. | Task Description | Status  | Expected Completion Date |
 |-----|------------------|----------|--------------------------|
 | 1   | Performing inference with the small GPT model.    | √ | 2023-10-31               |
-| 2   | Performing inference with the meta-llama2 7b model.    | × | 2023-11-05               |
-| 3   | Performing inference with quantized model    | × | 2023-11-15               |
-| 4   | Special hardware support (e.g., CUDA or even AIE)    | ×    | 2023-11-30               |
+| 2   | Performing inference with the meta-llama2 7b model.    | √ | 2023-11-01               |
+| 3   | Model Accuracy Verification    | × | 2023-11-05               |
+| 4   | Performing inference with quantized model    | × | 2023-11-15               |
+| 5   | Special hardware support (e.g., CUDA or even AIE)    | ×    | 2023-11-30               |
 
-**This project, llama2.cpp, is derived from the llama2.c project and has been entirely rewritten in pure C++. It's specifically designed for performing inference for the llama2 and other GPT models without any environmental dependencies. The transition to C++ enhances the code's readability and extensibility. It can be used not only for learning about LLM inference, but also for implementing inference support on specialized hardware.**
+This project, llama2.cpp, is derived from the llama2.c project and has been entirely rewritten in pure C++. It's specifically designed for performing inference for the llama2 and other GPT models without any environmental dependencies. The transition to C++ enhances the code's readability and extensibility. It can be used not only for learning about LLM inference, but also for implementing inference support on specialized hardware.
 
-## llama2.c
+## BUILD
+```bash
+cd llama2.cpp
+mkdir build
+cd build
+cmake .. #If you want to utilize OpenMP for acceleration, please use the following command "cmake .. -DUSE_OPENMP=ON"
+make
+```
+
+## RUN
+```bash
+./run stories15M.bin
+./run llama2_chat_7b.bin
+```
+
+
+**Below is an introduction to the llama2.c project**
+---
+### llama2.c
 
 <p align="center">
   <img src="assets/llama_cute.jpg" width="300" height="300" alt="Cute Llama">
@@ -21,7 +41,7 @@ As the architecture is identical, you can also load and inference Meta's Llama 2
 
 Please note that this repo started recently as a fun weekend project: I took my earlier [nanoGPT](https://github.com/karpathy/nanoGPT), tuned it to implement the Llama-2 architecture instead of GPT-2, and the meat of it was writing the C inference engine in [run.c](run.c). So the project is young and moving quickly. Hat tip to the awesome [llama.cpp](https://github.com/ggerganov/llama.cpp) for inspiring this project. Compared to llama.cpp, I wanted something super simple, minimal, and educational so I chose to hard-code the Llama 2 architecture and just roll one inference file of pure C with no dependencies.
 
-## feel the magic
+### feel the magic
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/karpathy/llama2.c/blob/master/run.ipynb)
 
@@ -73,7 +93,7 @@ There is also an even better 110M param model available, see [models](#models).
 
 Quick note on sampling, the recommendation for ~best results is to sample with `-t 1.0 -p 0.9`, i.e. temperature 1.0 (default) but also top-p sampling at 0.9 (default). Intuitively, top-p ensures that tokens with tiny probabilities do not get sampled, so we can't get "unlucky" during sampling, and we are less likely to go "off the rails" afterwards. More generally, to control the diversity of samples use either the temperature (i.e. vary `-t` between 0 and 1 and keep top-p off with `-p 0`) or the top-p value (i.e. vary `-p` between 0 and 1 and keep `-t 1`), but not both. Nice explainers on LLM sampling strategies include [this](https://peterchng.com/blog/2023/05/02/token-selection-strategies-top-k-top-p-and-temperature/), [this](https://docs.cohere.com/docs/controlling-generation-with-top-k-top-p) or [this](https://huggingface.co/blog/how-to-generate).
 
-## Meta's Llama 2 models
+### Meta's Llama 2 models
 
 As the neural net architecture is identical, we can also inference the Llama 2 models released by Meta. Sadly there is a bit of friction here due to licensing (I can't directly upload the checkpoints, I think). So Step 1, get the Llama 2 checkpoints by following the [Meta instructions](https://github.com/facebookresearch/llama). Once we have those checkpoints, we have to convert them into the llama2.c format.
 For this we need to install the python dependencies (`pip install -r requirements.txt`) and then use the `export.py` file, e.g. for 7B model:
@@ -122,11 +142,11 @@ python tokenizer.py --tokenizer-model=/path/to/CodeLlama-7b-Instruct/tokenizer.m
 ./run codellama2_7b_instruct.bin -m chat -z /path/to/CodeLlama-7b-Instruct/tokenizer.bin
 ```
 
-## hugginface models
+### hugginface models
 
 We can load any huggingface models that use the Llama 2 architecture. See the script [export.py](export.py) and the `--hf` flag to export the model .bin file.
 
-## models
+### models
 
 For the sake of examples of smaller, from-scratch models, I trained a small model series on TinyStories. All of these trained in a few hours on my training setup (4X A100 40GB GPUs). The 110M took around 24 hours. I am hosting them on huggingface hub [tinyllamas](https://huggingface.co/karpathy/tinyllamas), both in the original PyTorch .pt, and also in the llama2.c format .bin:
 
@@ -139,7 +159,7 @@ For the sake of examples of smaller, from-scratch models, I trained a small mode
 
 You'll notice that the 110M model is equivalent to GPT-1 in size. Alternatively, this is also the smallest model in the GPT-2 series (`GPT-2 small`), except the max context length is only 1024 instead of 2048. The only notable changes from GPT-1/2 architecture is that Llama uses RoPE relatively positional embeddings instead of absolute/learned positional embeddings, a bit more fancy SwiGLU non-linearity in the MLP, RMSNorm instead of LayerNorm, bias=False on all Linear layers, and is optionally multiquery (but this is not yet supported in llama2.c).
 
-## training
+### training
 
 Let's see how we can train a baby Llama 2 from scratch using the code in this repo. First let's download and pretokenize some source dataset, e.g. I like [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) so this is the only example currently available in this repo. But it should be very easy to add datasets, see the code.
 
@@ -183,7 +203,7 @@ python sample.py --checkpoint=out15M/stories15M.pt
 
 Which gives the same results.
 
-## custom tokenizers
+### custom tokenizers
 
 In everything above, we've assumed the custom Lllama 2 tokenizer with 32,000 tokens. However, in many boutique LLMs, using vocabulary this big might be an overkill. If you have a small application you have in mind, you might be much better off training your own tokenizers. This can make everything nicer - with smaller vocabs your model has fewer parameters (because the token embedding table is a lot smaller), the inference is faster (because there are fewer tokens to predict), and your average sequence length per example could also get smaller (because the compression is a lot more efficient on your data). So let's see how we train a custom tokenizer.
 
@@ -226,7 +246,7 @@ This writes the tokenizer to `data/tok4096.bin`. Now we can run inference, point
 
 This should print the samples. If you leave out the `-z` flag, it will use the default Llama 2 tokenizer, which would generate a good sequence of integers, but they would get translated using a different vocabulary to text, so it would look like gibberish.
 
-## performance
+### performance
 
 There are many ways to potentially speed up this code depending on your system. Have a look at the [Makefile](Makefile), which contains a lot of notes. The `make run` command currently uses the `-O3` optimization by default, i.e.:
 
@@ -262,7 +282,7 @@ OMP_NUM_THREADS=4 ./run out/model.bin
 Depending on your system resources you may want to tweak these hyperparameters and use more threads. But more is not always better, usually this is a bit U shaped. In particular, if your CPU has SMT (multithreading), try setting the number of threads to the number of physical cores rather than logical cores. The performance difference can be large due to cache thrashing and communication overhead. The PyTorch documentation [CPU specific optimizations
 ](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#cpu-specific-optimizations) has some good information that applies here too.
 
-## platforms
+### platforms
 
 On **Windows**, use `build_msvc.bat` in a Visual Studio Command Prompt to build with msvc, or you can use `make win64` to use mingw compiler toolchain from linux or windows to build the windows target. MSVC build will automatically use openmp and max threads appropriate for your CPU unless you set `OMP_NUM_THREADS` env.
 
@@ -270,7 +290,7 @@ On **Centos 7**, **Amazon Linux 2018** use `rungnu` Makefile target: `make rungn
 
 On **Mac**, use clang from brew for openmp build. Install clang as `brew install llvm` and use the installed clang binary to compile with openmp: `make runomp CC=/opt/homebrew/opt/llvm/bin/clang`
 
-## tests
+### tests
 
 You can run tests simply with pytest:
 
@@ -289,15 +309,15 @@ make testcc VERBOSITY=1
 
 Call for help: help add more tests.
 
-## ack
+### ack
 
 I trained the llama2.c storyteller models on a 4X A100 40GB box graciously provided by the excellent [Lambda labs](https://lambdalabs.com/service/gpu-cloud), thank you.
 
-## discord
+### discord
 
 Figured it's possible to reuse my existing discord channel (that I use for my [zero to hero youtube series](https://karpathy.ai/zero-to-hero.html)), see #llama2c channel on [discord](https://discord.gg/3zy8kqD9Cp), for any quick questions, related discussions, etc.
 
-## contributing
+### contributing
 
 A few words on this repo and the kinds of PRs that are likely to be accepted. What is the goal of this repo? Basically I think there will be a lot of interest in training or finetuning custom micro-LLMs (think ~100M - ~1B params, but let's say up to ~10B params) across a large diversity of applications, and deploying them in edge-adjacent environments (think MCUs, phones, web browsers, laptops, etc.). I'd like this repo to be the simplest, smallest, most hackable repo to support this workflow, both training and inference. In particular, this repo is not a complex framework with a 1000 knobs controlling inscrutible code across a nested directory structure of hundreds of files. Instead, I expect most applications will wish to create a fork of this repo and hack it to their specific needs and deployment platforms.
 
@@ -315,7 +335,7 @@ A few examples of PRs are that are not an excellent fit:
 
 If your candidate PRs have elements of these it doesn't mean they won't get merged, it just means they will make it into the gray territory. TLDR: I am eager to merge any mostly small, mostly localized, broadly applicable, clean changes that improve the efficiency and portability of the repo, while keep its hackability and readability. I appreciate all PRs seeking to help me improve the project, thank you! <3.
 
-## notable forks
+### notable forks
 
 - Rust
   - [llama2.rs](https://github.com/gaxler/llama2.rs) by @[gaxler](https://github.com/gaxler): a Rust port of this project
@@ -367,7 +387,7 @@ If your candidate PRs have elements of these it doesn't mean they won't get merg
 - [llama2.c - Llama 2 Everywhere](https://github.com/trholding/llama2.c) by @[trholding](https://github.com/trholding): Standalone, Bootable & Portable Binary Llama 2
 - [llama2.c-zh - Bilingual Chinese and English](https://github.com/chenyangMl/llama2.c-zh) by @[chenyangMl](https://github.com/chenyangMl): Expand tokenizer to support training and inference in both Chinese and English
 
-## unsorted todos
+### unsorted todos
 
 - add support in run.c of reading version 1+ files from export, later deprecate "version 0"
 - runq.c (int8 quantization) add
@@ -377,6 +397,6 @@ If your candidate PRs have elements of these it doesn't mean they won't get merg
 - make it easier to add a new dataset with not too much pain
 - (LoRA) finetuning and export of Llama 2 models
 
-## License
+### License
 
 MIT
