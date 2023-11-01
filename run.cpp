@@ -37,6 +37,13 @@ void Transformer::malloc_weights() {
     // ptr += p->seq_len * head_size / 2; // skip what used to be freq_cis_real (for RoPE)
     // ptr += p->seq_len * head_size / 2; // skip what used to be freq_cis_imag (for RoPE)
     // w->wcls = shared_weights ? w->token_embedding_table : ptr;
+    if (!shared_weights) {
+        w.wcls = std::make_unique<float[]>(config.vocab_size * config.dim);
+        if (!w.wcls.get()) {
+            std::cerr << "Malloc for wcls weights failed.\n";
+            std::exit(EXIT_FAILURE);
+        }
+    }
     if (!w.token_embedding_table.get() || !w.rms_att_weight.get() || !w.wq.get() ||
     !w.wk.get() || !w.wv.get() || !w.wo.get() || !w.rms_ffn_weight.get() || !w.w1.get() || !w.w2.get() || !w.w3.get() || !w.rms_final_weight.get()
     ) {
@@ -93,6 +100,11 @@ void Transformer::load_model(const std::string& checkpoint_path) {
     file.read(reinterpret_cast<char*>(w.w2.get()), n_layers * config.dim * config.hidden_dim * sizeof(float));
     file.read(reinterpret_cast<char*>(w.w3.get()), n_layers * config.dim * config.hidden_dim * sizeof(float));
     file.read(reinterpret_cast<char*>(w.rms_final_weight.get()), config.dim * sizeof(float));
+    
+    if (!shared_weights) {
+        file.seekg((config.dim+config.seq_len * head_size) * sizeof(float), std::ios::cur);
+        file.read(reinterpret_cast<char*>(w.wcls.get()), config.vocab_size * config.dim * sizeof(float));
+    }
     file.close();
     malloc_run_state();
 
@@ -232,8 +244,7 @@ float* Transformer::forward(int token, int pos) {
         matmul(s.logits.get(), s.x.get(), w.token_embedding_table.get(), config.dim, config.vocab_size);
     }
     else {
-        std::cerr<<"No support for wcl when shared_weights is false\n";
-        std::exit(EXIT_FAILURE);
+        matmul(s.logits.get(), s.x.get(), w.wcls.get(), config.dim, config.vocab_size);
     }
     return s.logits.get();
 
