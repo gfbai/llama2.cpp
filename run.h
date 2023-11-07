@@ -1,18 +1,18 @@
 #ifndef RUN_H
 #define RUN_H
-#include <iostream> // 用于输入输出
+#include <iostream>
 #include <vector>
 #include <fstream>
-#include <cstdlib>  // 用于一些通用的函数，例如rand(), srand(), exit(), malloc(), free()等
-#include <cctype>   // 用于字符处理
-#include <ctime>    // 用于时间处理
-#include <cmath>    // 用于数学运算
-#include <cstring>  // 用于字符串处理
-#include <fcntl.h>  // C++中没有完全对应的库，所以保留
+#include <cstdlib>
+#include <cctype>
+#include <ctime>
+#include <cmath>
+#include <cstring>
+#include <fcntl.h>
 #include <cstddef>
 #include <memory>
-#include <algorithm> // 为了使用std::sort
-#include <chrono> //测时
+#include <algorithm>
+#include <chrono>
 
 #if defined _WIN32
     #include "win.h"
@@ -99,13 +99,11 @@ private:
     void malloc_weights();
     void malloc_run_state();
 public:
-    // 模型权重、输入输出缓冲区等资源
     Config config;
     TransformerWeights w;
     RunState s;
     int shared_weights = 1;
-    void load_model(const std::string& checkpoint_path);  // 从文件加载模型
-    //std::string generate(const std::string& input, const Config& config); // 生成响应
+    void load_model(const std::string& checkpoint_path); 
     float* forward(int token, int pos);
 };
 

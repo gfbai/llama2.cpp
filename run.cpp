@@ -31,12 +31,6 @@ void Transformer::malloc_weights() {
     w.w2 = std::make_unique<float[]>(n_layers * config.dim * config.hidden_dim);
     w.w3 = std::make_unique<float[]>(n_layers * config.dim * config.hidden_dim);
     w.rms_final_weight = std::make_unique<float[]>(config.dim);
-    //w.wcls = shared_weights ? w.token_embedding_table : std::make_shared<float[]>(config.vocab_size * config.dim);
-    // w->rms_final_weight = ptr;
-    // ptr += p->dim;
-    // ptr += p->seq_len * head_size / 2; // skip what used to be freq_cis_real (for RoPE)
-    // ptr += p->seq_len * head_size / 2; // skip what used to be freq_cis_imag (for RoPE)
-    // w->wcls = shared_weights ? w->token_embedding_table : ptr;
     if (!shared_weights) {
         w.wcls = std::make_unique<float[]>(config.vocab_size * config.dim);
         if (!w.wcls.get()) {
@@ -121,7 +115,6 @@ float* Transformer::forward(int token, int pos) {
     // forward all the layers
     for(unsigned long long l = 0; l < config.n_layers; l++) {
         // attention rmsnorm
-        // s->xb存的是rmsnorm之后的结果，x用于作shortcut
         rmsnorm(s.xb.get(), s.x.get(), w.rms_att_weight.get() + l*dim, dim);
 
         // qkv matmuls for this position
@@ -229,9 +222,6 @@ float* Transformer::forward(int token, int pos) {
         for (int i = 0; i < dim; i++) {
             s.x[i] += s.xb[i];
         }
-
-
-
 
     }
     // final rmsnorm
