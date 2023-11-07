@@ -5,7 +5,7 @@
 |-----|------------------|----------|--------------------------|
 | 1   | Performing inference with the small GPT model.    | √ | 2023-10-31               |
 | 2   | Performing inference with the meta-llama2 7b model.    | √ | 2023-11-01               |
-| 3   | Model Accuracy Verification    | × | 2023-11-05               |
+| 3   | Model Accuracy Verification    | √ | 2023-11-05               |
 | 4   | Performing inference with quantized model    | × | 2023-11-15               |
 | 5   | Special hardware support (e.g., CUDA or even AIE)    | ×    | 2023-11-30               |
 

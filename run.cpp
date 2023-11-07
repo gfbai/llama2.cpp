@@ -102,7 +102,7 @@ void Transformer::load_model(const std::string& checkpoint_path) {
     file.read(reinterpret_cast<char*>(w.rms_final_weight.get()), config.dim * sizeof(float));
     
     if (!shared_weights) {
-        file.seekg((config.dim+config.seq_len * head_size) * sizeof(float), std::ios::cur);
+        file.seekg((config.seq_len * head_size) * sizeof(float), std::ios::cur);
         file.read(reinterpret_cast<char*>(w.wcls.get()), config.vocab_size * config.dim * sizeof(float));
     }
     file.close();
@@ -428,27 +428,25 @@ void Tokenizer::encode(const std::string &text, const int8_t &bos, const int8_t 
     // U+10000	U+10FFFF    11110xxx	10xxxxxx	10xxxxxx	10xxxxxx
 
     // process the raw (UTF-8) byte sequence of the input string
-    for (int i = 0; i < text.size(); i++) {
+    for (const char *c = text.c_str(); *c != '\0'; c++) {
         // reset buffer if the current byte is ASCII or a leading byte
         // 0xC0 is 11000000, so (*c & 0xC0) keeps the first 2 bits and zeros the rest
         // 0x80 is 10000000
         // in UTF-8, all continuation bytes start with "10" in first two bits
         // so in English this is: "if this byte is not a continuation byte"
-        char c = text[i];
-        char c_1 = text[i+1];
-        if ((c & 0xC0) != 0x80) {
+        if ((*c & 0xC0) != 0x80) {
             // this byte must be either a leading byte (11...) or an ASCII char (0x...)
             // => reset our location, as we're starting a new UTF-8 codepoint
             str_len = 0;
         }
 
         // append the current byte to the buffer
-        str_buffer[str_len++] = c; // ++ is post-increment, incremented after this line
+        str_buffer[str_len++] = *c; // ++ is post-increment, incremented after this line
         str_buffer[str_len] = '\0';
 
         // while the next character is a continuation byte, continue appending
         // but if there are too many of them, just stop to avoid overruning str_buffer size.
-        if ((c_1 & 0xC0) == 0x80 && str_len < 4) {
+        if ((*(c+1) & 0xC0) == 0x80 && str_len < 4) {
             continue;
         }
 
