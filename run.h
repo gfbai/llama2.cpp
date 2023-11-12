@@ -21,7 +21,16 @@
     #include <sys/mman.h>
 #endif
 
+
+extern int GS;
+
 typedef struct {
+    std::unique_ptr<int8_t[]> q;  // quantized values
+    std::unique_ptr<float[]> s;  // scaling factors
+} QuantizedTensor;
+
+class Config {
+public:
     int dim; // transformer dimension
     int hidden_dim; // for ffn layers
     int n_layers; // number of layers
@@ -29,32 +38,38 @@ typedef struct {
     int n_kv_heads; // number of key/value heads (can be < query heads because of multiquery)
     int vocab_size; // vocabulary size, usually 256 (byte-level)
     int seq_len; // max sequence length
-} Config;
+};
 
-typedef struct {
+template<typename T>
+class TransformerWeights {
+public:
     // token embedding table
     std::unique_ptr<float[]> token_embedding_table;    // (vocab_size, dim)
+    // final rmsnorm
+    std::unique_ptr<float[]> rms_final_weight; // (dim,)
+    // (optional) classifier weights for the logits, on the last layer
     // weights for rmsnorms
     std::unique_ptr<float[]> rms_att_weight; // (layer, dim) rmsnorm weights
     std::unique_ptr<float[]> rms_ffn_weight; // (layer, dim)
     // weights for matmuls. note dim == n_heads * head_size
-    std::unique_ptr<float[]> wq; // (layer, dim, n_heads * head_size)
-    std::unique_ptr<float[]> wk; // (layer, dim, n_kv_heads * head_size)
-    std::unique_ptr<float[]> wv; // (layer, dim, n_kv_heads * head_size)
-    std::unique_ptr<float[]> wo; // (layer, n_heads * head_size, dim)
+    std::unique_ptr<T[]> wq; // (layer, dim, n_heads * head_size)
+    std::unique_ptr<T[]> wk; // (layer, dim, n_kv_heads * head_size)
+    std::unique_ptr<T[]> wv; // (layer, dim, n_kv_heads * head_size)
+    std::unique_ptr<T[]> wo; // (layer, n_heads * head_size, dim)
     // weights for ffn
-    std::unique_ptr<float[]> w1; // (layer, hidden_dim, dim)
-    std::unique_ptr<float[]> w2; // (layer, dim, hidden_dim)
-    std::unique_ptr<float[]> w3; // (layer, hidden_dim, dim)
-    // final rmsnorm
-    std::unique_ptr<float[]> rms_final_weight; // (dim,)
-    // (optional) classifier weights for the logits, on the last layer
-    std::unique_ptr<float[]> wcls;
+    std::unique_ptr<T[]> w1; // (layer, hidden_dim, dim)
+    std::unique_ptr<T[]> w2; // (layer, dim, hidden_dim)
+    std::unique_ptr<T[]> w3; // (layer, hidden_dim, dim)
+    std::unique_ptr<T[]> wcls;
     // tensor2d freq_cis_real;  // [seq_len, (dim/n_heads)/2]
     // tensor2d freq_cis_imag;  // [seq_len, (dim/n_heads)/2]
-} TransformerWeights;
+    std::unique_ptr<T[]> q_tokens; // (vocab_size, dim)
+    
+};
 
-typedef struct {
+template<typename T>
+class RunState {
+public:
     // current wave of activations
     std::unique_ptr<float[]> x; // activation at current time stamp (dim,)
     std::unique_ptr<float[]> xb; // same, but inside a residual branch (dim,)
@@ -69,7 +84,48 @@ typedef struct {
     // kv cache
     std::unique_ptr<float[]> key_cache;   // (layer, seq_len, dim)
     std::unique_ptr<float[]> value_cache; // (layer, seq_len, dim)
-} RunState;
+};
+
+template<>
+class RunState<float> {
+public:
+    // current wave of activations
+    std::unique_ptr<float[]> x; // activation at current time stamp (dim,)
+    std::unique_ptr<float[]> xb; // same, but inside a residual branch (dim,)
+    std::unique_ptr<float[]> xb2; // an additional buffer just for convenience (dim,)
+    std::unique_ptr<float[]> hb; // buffer for hidden dimension in the ffn (hidden_dim,)
+    std::unique_ptr<float[]> hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
+    std::unique_ptr<float[]> q; // query (dim,)
+    std::unique_ptr<float[]> k; // key (dim,)
+    std::unique_ptr<float[]> v; // value (dim,)
+    std::unique_ptr<float[]> att; // buffer for scores/attention values (n_heads, seq_len)
+    std::unique_ptr<float[]> logits; // output logits
+    // kv cache
+    std::unique_ptr<float[]> key_cache;   // (layer, seq_len, dim)
+    std::unique_ptr<float[]> value_cache; // (layer, seq_len, dim)
+};
+
+template<>
+class RunState<QuantizedTensor> {
+public:
+    // current wave of activations
+    std::unique_ptr<float[]> x; // activation at current time stamp (dim,)
+    std::unique_ptr<float[]> xb; // same, but inside a residual branch (dim,)
+    std::unique_ptr<float[]> xb2; // an additional buffer just for convenience (dim,)
+    std::unique_ptr<float[]> hb; // buffer for hidden dimension in the ffn (hidden_dim,)
+    std::unique_ptr<float[]> hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
+    std::unique_ptr<float[]> q; // query (dim,)
+    std::unique_ptr<float[]> k; // key (dim,)
+    std::unique_ptr<float[]> v; // value (dim,)
+    std::unique_ptr<float[]> att; // buffer for scores/attention values (n_heads, seq_len)
+    std::unique_ptr<float[]> logits; // output logits
+    // kv cache
+    std::unique_ptr<float[]> key_cache;   // (layer, seq_len, dim)
+    std::unique_ptr<float[]> value_cache; // (layer, seq_len, dim)
+
+    std::unique_ptr<QuantizedTensor[]>  xq; // quantized x (dim,)
+    std::unique_ptr<QuantizedTensor[]>  hq; // quantized hb (hidden_dim,)
+};
 
 typedef struct {
     std::string str;
@@ -94,14 +150,15 @@ int str_lookup(const std::string& str, const std::unique_ptr<TokenIndex[]>& sort
     return -1; // Not found
 }
 
+template<typename T>
 class Transformer {
 private:
     void malloc_weights();
     void malloc_run_state();
 public:
     Config config;
-    TransformerWeights w;
-    RunState s;
+    TransformerWeights<T> w;
+    RunState<T> s;
     int shared_weights = 1;
     void load_model(const std::string& checkpoint_path); 
     float* forward(int token, int pos);
@@ -157,6 +214,25 @@ public:
     int sample(float* logits);
 
 };
+
+bool is_quantized_model(const std::string& checkpoint_path) {
+    std::ifstream file(checkpoint_path,std::ios::binary);
+    if (!file) {
+        std::cerr << "Couldn't open file " << checkpoint_path << '\n';
+        std::exit(EXIT_FAILURE);
+    }
+    uint32_t magic_number;
+    int version;
+
+    file.read(reinterpret_cast<char*> (&magic_number),sizeof(uint32_t));
+    file.read(reinterpret_cast<char*> (&version),sizeof(int));
+
+    file.close();
+    if (magic_number != 0x616b3432 || version!= 2) {
+        return false;
+    }
+    return true;
+}
 
 
 void safe_print(const std::string& piece) {
@@ -228,11 +304,81 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
     }
 }
 
+void q_matmul(float* xout, QuantizedTensor *x, QuantizedTensor *w, int n, int d) {
+    // W (d,n) @ x (n,) -> xout (d,)
+    // by far the most amount of time is spent inside this little function
+    // inputs to this function are both quantized
+
+    int i;
+    #pragma omp parallel for private(i)
+    for (i = 0; i < d; i++) {
+
+        float val = 0.0f;
+        int32_t ival = 0;
+        int in = i * n;
+
+        // do the matmul in groups of GS
+        int j;
+        for (j = 0; j <= n - GS; j += GS) {
+            for (int k = 0; k < GS; k++) {
+                ival += ((int32_t) x->q[j + k]) * ((int32_t) w->q[in + j + k]);
+            }
+            val += ((float) ival) * w->s[(in + j) / GS] * x->s[j / GS];
+            ival = 0;
+        }
+
+        xout[i] = val;
+    }
+}
+
 void read_stdin(const std::string& guide, std::string& buffer, size_t max_len) {
     std::cout << guide;
     std::getline(std::cin, buffer);
     if(buffer.length() > max_len) {
         buffer.resize(max_len);
+    }
+}
+
+void dequantize(QuantizedTensor *qx, float* x, int n) {
+    for (int i = 0; i < n; i++) {
+        x[i] = qx->q[i] * qx->s[i / GS];
+    }
+}
+
+void quantize(QuantizedTensor *qx, float* x, int n) {
+    int num_groups = n / GS;
+    float Q_MAX = 127.0f;
+
+    for (int group = 0; group < num_groups; group++) {
+        // find the max absolute value in the current group
+        float wmax = 0.0;
+        for (int i = 0; i < GS; i++) {
+            float val = fabs(x[group * GS + i]);
+            if (val > wmax) {
+                wmax = val;
+            }
+        }
+
+        // calculate and write the scaling factor
+        float scale = wmax / Q_MAX;
+        qx->s[group] = scale;
+
+        // calculate and write the quantized values
+        for (int i = 0; i < GS; i++) {
+            float quant_value = x[group * GS + i] / scale; // scale
+            int8_t quantized = (int8_t) round(quant_value); // round and clamp
+            qx->q[group * GS + i] = quantized;
+        }
+    }
+}
+
+void init_quantized_tensors(std::ifstream& file, QuantizedTensor* w, int n_layers, int each_layer) {
+    
+    for(int i = 0; i < n_layers; i++) {
+        w[i].q = std::make_unique<int8_t[]>(each_layer);
+        w[i].s = std::make_unique<float[]>(each_layer / GS);
+        file.read(reinterpret_cast<char*>(w[i].q.get()), each_layer * sizeof(int8_t));
+        file.read(reinterpret_cast<char*>(w[i].s.get()), each_layer / GS * sizeof(float));
     }
 }
 

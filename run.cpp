@@ -1,4 +1,5 @@
 #include "run.h"
+int GS = 0;
 
 void error_usage() {
     std::cerr << R"(Usage:   run <checkpoint> [options]
@@ -16,7 +17,8 @@ Options:
     std::exit(EXIT_FAILURE);
 }
 
-void Transformer::malloc_weights() {
+template<>
+void Transformer<float>::malloc_weights() {
     int head_size = config.dim / config.n_heads;
     // make sure the multiplications below are done in 64bit to fit the parameter counts of 13B+ models
     unsigned long long n_layers = config.n_layers;
@@ -47,7 +49,43 @@ void Transformer::malloc_weights() {
 
 }
 
-void Transformer::malloc_run_state() {
+
+template<>
+void Transformer<QuantizedTensor>::malloc_weights() {
+    int head_size = config.dim / config.n_heads;
+    // make sure the multiplications below are done in 64bit to fit the parameter counts of 13B+ models
+    unsigned long long n_layers = config.n_layers;
+    w.token_embedding_table = std::make_unique<float[]>(config.vocab_size * config.dim);
+    w.rms_att_weight = std::make_unique<float[]>(n_layers * config.dim);
+    w.wq = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.wk = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.wv = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.wo = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.rms_ffn_weight = std::make_unique<float[]>(n_layers * config.dim);
+    w.w1 = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.w2 = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.w3 = std::make_unique<QuantizedTensor[]>(n_layers);
+    w.rms_final_weight = std::make_unique<float[]>(config.dim);
+
+    w.q_tokens = std::make_unique<QuantizedTensor[]>(1);
+
+    if (!shared_weights) {
+        w.wcls = std::make_unique<QuantizedTensor[]>(1);
+        if (!w.wcls.get()) {
+            std::cerr << "Malloc for wcls weights failed.\n";
+            std::exit(EXIT_FAILURE);
+        }
+    }
+    if (!w.token_embedding_table.get() || !w.rms_att_weight.get() || !w.wq.get() || !w.q_tokens.get() ||
+    !w.wk.get() || !w.wv.get() || !w.wo.get() || !w.rms_ffn_weight.get() || !w.w1.get() || !w.w2.get() || !w.w3.get() || !w.rms_final_weight.get()
+    ) {
+        std::cerr << "Malloc for weights failed.\n";
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+template<>
+void Transformer<float>::malloc_run_state() {
     int kv_dim = (config.dim * config.n_kv_heads) / config.n_heads;
     s.x = std::make_unique<float[]>(config.dim);
     s.xb = std::make_unique<float[]>(config.dim);
@@ -69,7 +107,53 @@ void Transformer::malloc_run_state() {
     }
 }
 
-void Transformer::load_model(const std::string& checkpoint_path) {
+template<>
+void Transformer<QuantizedTensor>::malloc_run_state() {
+    int kv_dim = (config.dim * config.n_kv_heads) / config.n_heads;
+    s.x = std::make_unique<float[]>(config.dim);
+    s.xb = std::make_unique<float[]>(config.dim);
+    s.xb2 = std::make_unique<float[]>(config.dim);
+    s.hb = std::make_unique<float[]>(config.hidden_dim);
+    s.hb2 = std::make_unique<float[]>(config.hidden_dim);
+    s.q = std::make_unique<float[]>(config.dim);
+    s.k = std::make_unique<float[]>(kv_dim);
+    s.v = std::make_unique<float[]>(kv_dim);
+    s.att = std::make_unique<float[]>(config.seq_len * config.n_heads);
+    s.logits = std::make_unique<float[]>(config.vocab_size);
+    s.key_cache = std::make_unique<float[]>(config.n_layers * config.seq_len * kv_dim);
+    s.value_cache = std::make_unique<float[]>(config.n_layers * config.seq_len * kv_dim);
+    if (!s.x.get() || !s.xb.get() || !s.xb2.get() || !s.hb.get() || !s.hb2.get() || !s.q.get()
+     || !s.k.get() || !s.v.get() || !s.att.get() || !s.logits.get() || !s.key_cache.get()
+     || !s.value_cache.get()) {
+        std::cerr << "Malloc for run state failed.\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    
+    s.xq = std::make_unique<QuantizedTensor[]>(1);
+    s.hq = std::make_unique<QuantizedTensor[]>(1);
+    if (!s.xq.get() || !s.hq.get()) {
+        std::cerr << "Malloc for run state xq or hq failed.\n";
+        std::exit(EXIT_FAILURE);
+    }
+    s.xq[0].q = std::make_unique<int8_t[]>(config.dim);
+    s.xq[0].s = std::make_unique<float[]>(config.dim);
+    if (!s.xq[0].q.get() || !s.xq[0].s.get()) {
+        std::cerr << "Malloc for run state xq[0] failed.\n";
+        std::exit(EXIT_FAILURE);
+    }
+    s.hq[0].q = std::make_unique<int8_t[]>(config.hidden_dim);
+    s.hq[0].s = std::make_unique<float[]>(config.hidden_dim);
+    if (!s.hq[0].q.get() || !s.hq[0].s.get()) {
+        std::cerr << "Malloc for run state hq[0] failed.\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+}
+
+
+template<>
+void Transformer<float>::load_model(const std::string& checkpoint_path) {
     std::ifstream file(checkpoint_path,std::ios::binary);
     if (!file) {
         std::cerr << "Couldn't open file " << checkpoint_path << '\n';
@@ -104,7 +188,73 @@ void Transformer::load_model(const std::string& checkpoint_path) {
 
 }
 
-float* Transformer::forward(int token, int pos) {
+template<>
+void Transformer<QuantizedTensor>::load_model(const std::string& checkpoint_path) {
+
+    std::ifstream file(checkpoint_path, std::ios::binary);
+    if (!file) {
+        std::cerr << "Couldn't open file " << checkpoint_path << '\n';
+        std::exit(EXIT_FAILURE);
+    }
+
+    uint32_t magic_number;
+    file.read(reinterpret_cast<char*>(&magic_number), sizeof(uint32_t));
+    if (magic_number != 0x616b3432) {
+        std::cerr << "Bad magic number\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    int version;
+    file.read(reinterpret_cast<char*>(&version), sizeof(int));
+    if (version != 2) {
+        std::cerr << "Bad version " << version << ", need version 2\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    file.read(reinterpret_cast<char*> (&config),sizeof(Config));
+
+    // read in flags
+    uint8_t shared_classifier; // a byte to indicate if the classifier is shared
+    file.read(reinterpret_cast<char*>(&shared_classifier), sizeof(uint8_t));
+
+    int group_size;
+    file.read(reinterpret_cast<char*>(&group_size), sizeof(int));
+    GS = group_size; 
+
+    shared_weights = shared_classifier;
+    //config.vocab_size = std::abs(config.vocab_size);
+
+    malloc_weights();
+    int head_size = config.dim / config.n_heads;
+    unsigned long long n_layers = config.n_layers;
+
+    int header_size = 256;
+    file.seekg(header_size, std::ios::beg);
+    file.read(reinterpret_cast<char*>(w.rms_att_weight.get()), config.n_layers * config.dim * sizeof(float));
+    file.read(reinterpret_cast<char*>(w.rms_ffn_weight.get()), n_layers * config.dim * sizeof(float));
+    file.read(reinterpret_cast<char*>(w.rms_final_weight.get()), config.dim * sizeof(float));
+    init_quantized_tensors(file, w.q_tokens.get(), 1, config.vocab_size * config.dim);
+    dequantize(w.q_tokens.get(), w.token_embedding_table.get(), config.vocab_size * config.dim);
+
+
+    init_quantized_tensors(file, w.wq.get(), n_layers, config.dim * config.n_heads * head_size);
+    init_quantized_tensors(file, w.wk.get(), n_layers, config.dim * config.n_kv_heads * head_size);
+    init_quantized_tensors(file, w.wv.get(), n_layers, config.dim * config.n_kv_heads * head_size);
+    init_quantized_tensors(file, w.wo.get(), n_layers, config.dim * config.n_heads * head_size);
+
+    init_quantized_tensors(file, w.w1.get(), n_layers, config.dim * config.hidden_dim);
+    init_quantized_tensors(file, w.w2.get(), n_layers, config.dim * config.hidden_dim);
+    init_quantized_tensors(file, w.w3.get(), n_layers, config.dim * config.hidden_dim);
+
+    if (!shared_weights) {
+        init_quantized_tensors(file, w.wcls.get(), 1, config.dim * config.vocab_size);
+    }
+    file.close();
+    malloc_run_state();
+}
+
+template<>
+float* Transformer<float>::forward(int token, int pos) {
     int dim = config.dim;
     int kv_dim = (config.dim * config.n_kv_heads) / config.n_heads;
     int kv_mul = config.n_heads / config.n_kv_heads; // integer multiplier of the kv sharing in multiquery
@@ -239,6 +389,149 @@ float* Transformer::forward(int token, int pos) {
     return s.logits.get();
 
 }
+
+
+template<>
+float* Transformer<QuantizedTensor>::forward(int token, int pos) {
+    int dim = config.dim;
+    int kv_dim = (config.dim * config.n_kv_heads) / config.n_heads;
+    int kv_mul = config.n_heads / config.n_kv_heads; // integer multiplier of the kv sharing in multiquery
+    int hidden_dim =  config.hidden_dim;
+    int head_size = dim / config.n_heads;
+    // copy the token embedding into x
+    std::memcpy(s.x.get(), w.token_embedding_table.get() + token * dim, dim * sizeof(float));
+    // forward all the layers
+    for(unsigned long long l = 0; l < config.n_layers; l++) {
+        // attention rmsnorm
+        rmsnorm(s.xb.get(), s.x.get(), w.rms_att_weight.get() + l*dim, dim);
+
+        // qkv matmuls for this position
+        quantize(s.xq.get(), s.xb.get(), dim);
+        q_matmul(s.q.get(), s.xq.get(), w.wq.get() + l, dim, dim);
+        q_matmul(s.k.get(), s.xq.get(), w.wk.get() + l, dim, kv_dim);
+        q_matmul(s.v.get(), s.xq.get(), w.wv.get() + l, dim, kv_dim);
+
+        // RoPE relative positional encoding: complex-valued rotate q and k in each head
+        for (int i = 0; i < dim; i+=2) {
+            int head_dim = i % head_size;
+            float freq = 1.0f / powf(10000.0f, head_dim / (float)head_size);
+            float val = pos * freq;
+            float fcr = cosf(val);
+            float fci = sinf(val);
+            int rotn = i < kv_dim ? 2 : 1; // how many vectors? 2 = q & k, 1 = q only
+            for (int v = 0; v < rotn; v++) {
+                float* vec = v == 0 ? s.q.get() : s.k.get(); // the vector to rotate (query or key)
+                float v0 = vec[i];
+                float v1 = vec[i+1];
+                vec[i]   = v0 * fcr - v1 * fci;
+                vec[i+1] = v0 * fci + v1 * fcr;
+            }
+        }
+
+        // save key,value at this time step (pos) to our kv cache
+        int loff = l * config.seq_len * kv_dim; // kv cache layer offset for convenience
+        float* key_cache_row = s.key_cache.get() + loff + pos * kv_dim;
+        float* value_cache_row = s.value_cache.get() + loff + pos * kv_dim;
+        std::memcpy(key_cache_row, s.k.get(), kv_dim * sizeof(*key_cache_row));
+        std::memcpy(value_cache_row, s.v.get(), kv_dim * sizeof(*value_cache_row));
+
+        // multihead attention. iterate over all heads
+        int h;
+        #pragma omp parallel for private(h)
+        for (h = 0; h < config.n_heads; h++) {
+            // get the query vector for this head
+            float* q = s.q.get() + h * head_size;
+            // attention scores for this head
+            float* att = s.att.get() + h * config.seq_len;
+            // iterate over all timesteps, including the current one
+            for (int t = 0; t <= pos; t++) {
+                // get the key vector for this head and at this timestep
+                float* k = s.key_cache.get() + loff + t * kv_dim + (h / kv_mul) * head_size;
+                // calculate the attention score as the dot product of q and k
+                float score = 0.0f;
+                for (int i = 0; i < head_size; i++) {
+                    //q.shape = (1,head_size) k.shape= (head_size, n_head, seq_len)
+                    score += q[i] * k[i];
+                }
+                score /= sqrtf(head_size);
+                // save the score to the attention buffer
+                // att.shape = (n_heads, seq_len)
+                att[t] = score;
+            }
+
+
+            // softmax the scores to get attention weights, from 0..pos inclusively
+            softmax(att, pos + 1);
+
+            // weighted sum of the values, store back into xb
+            float* xb = s.xb.get() + h * head_size;
+            std::memset(xb, 0, head_size * sizeof(float));
+            for (int t = 0; t <= pos; t++) {
+                // get the value vector for this head and at this timestep
+                float* v = s.value_cache.get() + loff + t * kv_dim + (h / kv_mul) * head_size;
+                // get the attention weight for this timestep
+                float a = att[t];
+                // accumulate the weighted value into xb
+                for (int i = 0; i < head_size; i++) {
+                    xb[i] += a * v[i];
+                }
+            }
+        }
+
+        quantize(s.xq.get(), s.xb.get(), dim);
+        // final matmul to get the output of the attention
+        q_matmul(s.xb2.get(), s.xq.get(), w.wo.get() + l, dim, dim);
+
+        // residual connection back into x
+        for (int i = 0; i < dim; i++) {
+            s.x[i] += s.xb2[i];
+        }
+
+        // ffn rmsnorm
+        rmsnorm(s.xb.get(), s.x.get(), w.rms_ffn_weight.get() + l*dim, dim);
+
+        // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+        // first calculate self.w1(x) and self.w3(x)
+        quantize(s.xq.get(), s.xb.get(), dim);
+        q_matmul(s.hb.get(), s.xq.get(), w.w1.get() + l, dim, hidden_dim);
+        q_matmul(s.hb2.get(), s.xq.get(), w.w3.get() + l, dim, hidden_dim);
+
+        // SwiGLU non-linearity
+        for (int i = 0; i < hidden_dim; i++) {
+            float val = s.hb[i];
+            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+            val *= (1.0f / (1.0f + expf(-val)));
+            // elementwise multiply with w3(x)
+            val *= s.hb2[i];
+            s.hb[i] = val;
+        }
+
+        // final matmul to get the output of the ffn
+        quantize(s.hq.get(), s.hb.get(), hidden_dim);
+        q_matmul(s.xb.get(), s.hq.get(), w.w2.get() + l, hidden_dim, dim);
+
+        // residual connection
+        for (int i = 0; i < dim; i++) {
+            s.x[i] += s.xb[i];
+        }
+
+    }
+    // final rmsnorm
+    rmsnorm(s.x.get(), s.x.get(), w.rms_final_weight.get(), dim);
+    // classifier into logits
+
+    quantize(s.xq.get(), s.x.get(), dim);
+    if (shared_weights) {
+        //w.wcls = std::move(w.token_embedding_table);
+        q_matmul(s.logits.get(), s.xq.get(), w.q_tokens.get(), config.dim, config.vocab_size);
+    }
+    else {
+        q_matmul(s.logits.get(), s.xq.get(), w.wcls.get(), config.dim, config.vocab_size);
+    }
+    return s.logits.get();
+
+}
+
 
 void Tokenizer::build_tokenizer(const std::string& tokenizer_path, int size_for_vacab) {
     vocab_size = size_for_vacab;
@@ -505,7 +798,8 @@ std::string Tokenizer::decode(int prev_token, int token) {
     return std::string(piece);
 }
 
-void generate(Transformer &transformer, Tokenizer &tokenizer, Sampler &sampler, std::string& prompt, int steps) {
+template<typename T>
+void generate(Transformer<T> &transformer, Tokenizer &tokenizer, Sampler &sampler, std::string& prompt, int steps) {
     std::string empty_prompt(1, '\0');
     if (prompt.empty()) {
         prompt = empty_prompt;
@@ -559,7 +853,8 @@ void generate(Transformer &transformer, Tokenizer &tokenizer, Sampler &sampler, 
     }
 }
 
-void chat(Transformer &transformer, Tokenizer &tokenizer, Sampler &sampler,
+template<typename T>
+void chat(Transformer<T> &transformer, Tokenizer &tokenizer, Sampler &sampler,
           std::string& cli_user_prompt, std::string& cli_system_prompt, int steps) {
 
     // buffers for reading the system prompt and user prompt from stdin
@@ -679,23 +974,46 @@ int main(int argc, char* argv[]) {
     if (temperature < 0.0) temperature = 0.0;
     if (topp < 0.0 || 1.0 < topp) topp = 0.9;
     if (steps < 0) steps = 0;
-    Transformer transformer;
-    transformer.load_model(checkpoint_path);
-    if (steps == 0 || steps > transformer.config.seq_len) steps = transformer.config.seq_len; // ovrerride to ~max length
-    Tokenizer tokenizer;
-    tokenizer.build_tokenizer(tokenizer_path, transformer.config.vocab_size);
-    Sampler sampler;
-    sampler.build_sampler(transformer.config.vocab_size, temperature, topp, rng_seed);
-   
-    // run!
-    if (mode == "generate") {
-        generate(transformer, tokenizer, sampler, prompt, steps);
-    } else if (mode == "chat") {
-        chat(transformer, tokenizer, sampler, prompt, system_prompt, steps);
-    } else {
-        std::cerr << "unknown mode: " << mode << "\n" <<std::endl;
-        error_usage();
+    if (is_quantized_model(checkpoint_path)) {
+        Transformer<QuantizedTensor> transformer;
+        transformer.load_model(checkpoint_path);
+        if (steps == 0 || steps > transformer.config.seq_len) steps = transformer.config.seq_len; // ovrerride to ~max length
+        Tokenizer tokenizer;
+        tokenizer.build_tokenizer(tokenizer_path, transformer.config.vocab_size);
+        Sampler sampler;
+        sampler.build_sampler(transformer.config.vocab_size, temperature, topp, rng_seed);
+    
+        // run!
+        if (mode == "generate") {
+            generate(transformer, tokenizer, sampler, prompt, steps);
+        } else if (mode == "chat") {
+            chat(transformer, tokenizer, sampler, prompt, system_prompt, steps);
+        } else {
+            std::cerr << "unknown mode: " << mode << "\n" <<std::endl;
+            error_usage();
+        }
+        
     }
+    else {
+        Transformer<float> transformer;
+        transformer.load_model(checkpoint_path);
+        if (steps == 0 || steps > transformer.config.seq_len) steps = transformer.config.seq_len; // ovrerride to ~max length
+        Tokenizer tokenizer;
+        tokenizer.build_tokenizer(tokenizer_path, transformer.config.vocab_size);
+        Sampler sampler;
+        sampler.build_sampler(transformer.config.vocab_size, temperature, topp, rng_seed);
+    
+        // run!
+        if (mode == "generate") {
+            generate(transformer, tokenizer, sampler, prompt, steps);
+        } else if (mode == "chat") {
+            chat(transformer, tokenizer, sampler, prompt, system_prompt, steps);
+        } else {
+            std::cerr << "unknown mode: " << mode << "\n" <<std::endl;
+            error_usage();
+        }
+    }
+
     return 0;
 
 
