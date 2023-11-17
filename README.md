@@ -11,6 +11,21 @@
 
 This project, llama2.cpp, is derived from the llama2.c project and has been entirely rewritten in pure C++. It's specifically designed for performing inference for the llama2 and other GPT models without any environmental dependencies. The transition to C++ enhances the code's readability and extensibility. It can be used not only for learning about LLM inference, but also for implementing inference support on specialized hardware.
 
+## Performance with llama2_7b model
+Hardware platform:12 vCPU Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz
+| Method | Tokens/s|
+|--------------------------|--------------------------|
+| Pure c++   |  0.04   |
+| Using OPENMP and -Ofast -march=native   |  1.15 |
+
+## Performance with llama2_7b quantized model
+Hardware platform:12 vCPU Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz
+| Method | Tokens/s|
+|--------------------------|--------------------------|
+| Pure c++   |  0.04   |
+| Using OPENMP and -Ofast -march=native   |  5.1 |
+
+
 ## BUILD
 ```bash
 cd llama2.cpp
