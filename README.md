@@ -22,7 +22,7 @@ Hardware platform:12 vCPU Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz
 Hardware platform:12 vCPU Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz
 | Method | Tokens/s|
 |--------------------------|--------------------------|
-| Pure c++   |  0.04   |
+| Pure c++   |  slower than 0.04   |
 | Using OPENMP and -Ofast -march=native   |  5.1 |
 
 
@@ -39,6 +39,7 @@ make
 ```bash
 ./run stories15M.bin
 ./run llama2_chat_7b.bin
+./run quantized_llama2_chat_7b.bin
 ```
 
 
