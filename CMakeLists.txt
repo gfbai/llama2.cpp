@@ -5,12 +5,17 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Define an option for OpenMP support
 option(USE_OPENMP "Use OpenMP for parallelism" OFF)  # Default is not using OpenMP
+option(ENABLE_OPT "Whether to enable build arguments for optimization" OFF)
 
 # Set build type based on whether USE_OPENMP is turned on
 if(USE_OPENMP)
     set(CMAKE_BUILD_TYPE Release)  # Set to Release if using OpenMP
 else()
     set(CMAKE_BUILD_TYPE Debug)    # Otherwise, set to Debug
+endif()
+
+if (ENABLE_OPT)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Ofast -march=native")
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/..)
