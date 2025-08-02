@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Define an option for OpenMP support
 option(USE_OPENMP "Use OpenMP for parallelism" OFF)  # Default is not using OpenMP
-option(ENABLE_OPT "Whether to enable build arguments for optimization" OFF)
+option(USE_OPT_ARGS_ONLY "Use build arguments for optimization (with OpenMP disabled)" OFF)
 
 # Set build type based on whether USE_OPENMP is turned on
 if(USE_OPENMP)
@@ -14,7 +14,7 @@ else()
     set(CMAKE_BUILD_TYPE Debug)    # Otherwise, set to Debug
 endif()
 
-if (ENABLE_OPT)
+if (USE_OPT_ARGS_ONLY)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Ofast -march=native")
 endif()
 
@@ -23,6 +23,19 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 # If USE_OPENMP is turned on, find OpenMP and set additional flags
 if(USE_OPENMP)
+    # Set OpenMP paths for macOS with Homebrew
+    if(APPLE)
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "/opt/homebrew/opt/libomp/lib/libomp.dylib")
+        set(OpenMP_C_INCLUDE_DIRS "/opt/homebrew/opt/libomp/include")
+
+        # Set OpenMP C++ flags and library names
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_CXX_INCLUDE_DIRS "/opt/homebrew/opt/libomp/include")
+    endif()
+
     find_package(OpenMP REQUIRED)  # Require OpenMP
     if(OpenMP_CXX_FOUND)
         add_definitions(-DUSE_OPENMP)
