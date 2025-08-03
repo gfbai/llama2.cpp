@@ -1,5 +1,11 @@
 # llama2.cpp
 
+## Overview of the Inference Process Flow
+
+<p align="center">
+  <img src="assets/inference_overview.png" height="800" alt="Overview of Inference">
+</p>
+
 ## TODO
 | No. | Task Description | Status  | Expected Completion Date |
 |-----|------------------|----------|--------------------------|
